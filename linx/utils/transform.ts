@@ -6,6 +6,7 @@ import {
   ProductDetailsPage,
   PropertyValue,
   UnitPriceSpecification,
+  VideoObject,
 } from "../../commerce/types.ts";
 import { DEFAULT_IMAGE } from "../../commerce/utils/constants.ts";
 import { CartResponse } from "./types/basketJSON.ts";
@@ -30,12 +31,14 @@ import {
 } from "./types/suggestionsJSON.ts";
 import { ProductAuction } from "./types/auctionJSON.ts";
 import { Model as ProductAuctionDetail } from "./types/auctionDetailJSON.ts";
+import { Product as LinxProductGetByIdJSON } from "./types/productByIdJSON.ts";
 
 type LinxProductGroup =
   | LinxProductGroupList
   | LinxProductGroupProductJSON
   | LinxProductGroupGridProductsJSON
-  | LinxSuggestionProductGroupJSON;
+  | LinxSuggestionProductGroupJSON
+  | LinxProductGetByIdJSON;
 type LinxProduct =
   | LinxProductFromList
   | LinxProductFromJSON
@@ -101,7 +104,11 @@ const toOffer = (variant: LinxProduct, product: LinxProductGroup): Offer => {
     priceValidUntil: item?.PromotionTo ?? undefined,
     price: item.Price?.SalesPrice ?? item.RetailPrice ?? Infinity,
     priceSpecification,
-    inventoryLevel: {},
+    inventoryLevel: {
+      "@type": "QuantitativeValue",
+      value: Number(item.StockBalance) || 0,
+      unitCode: "C62"
+    },
     availability:
       item.Availability != "O" && item.AvailabilityText != "Descontinuado"
         ? "https://schema.org/InStock"
@@ -141,14 +148,22 @@ export const toProduct = (
     additionalType: "skuOptions",
   }));
 
-  const prodOptions: PropertyValue[] = product.Options.map(option => {
-    return option.Values.map(optValue => {
-      const imagePath = optValue.ImagePath 
+  const productVideo: VideoObject[] = product?.Medias?.filter((option) =>
+    option.MediaType === "Video"
+  ).map((option) => ({
+    "@type": "PropertyValue" as const,
+    name: option.Title || "",
+    value: option.Url || "",
+    propertyID: option.VariationPath,
+    additionalType: "productVideo",
+  }));
+
+  const prodOptions: PropertyValue[] = product.Options.map((option) => {
+    return option.Values.map((optValue) => {
+      const imagePath = optValue.ImagePath
         ? `/Custom/Content/Swatches${optValue.ImagePath}`
         : null;
-      const url = imagePath
-        ? new URL(imagePath, cdn).href
-        : "";
+      const url = imagePath ? new URL(imagePath, cdn).href : "";
 
       const color = optValue.Color ? optValue.Color : "";
 
@@ -162,7 +177,7 @@ export const toProduct = (
         }],
         color: color,
         additionalType: "prodOptions",
-      }
+      };
     });
   }).flat();
 
@@ -221,8 +236,8 @@ export const toProduct = (
   const image = images.length !== 0
     ? images
     : groupImages.length !== 0
-    ? groupImages
-    : [DEFAULT_IMAGE];
+      ? groupImages
+      : [DEFAULT_IMAGE];
 
   return {
     "@type": "Product",
@@ -239,6 +254,7 @@ export const toProduct = (
       logo: product.BrandImageUrl ?? undefined,
     },
     additionalProperty,
+    video: productVideo,
     image,
     isVariantOf: {
       "@type": "ProductGroup",
@@ -269,7 +285,7 @@ export const toFilters = (facets: Facet[], url: URL): Filter[] => {
     "@type": "FilterToggle",
     label: f.Name,
     key: f.Alias,
-    values: f.AvailableOptions.map(
+    values: f.SelectedOptions.concat(f.AvailableOptions).map(
       ({ Url: value, Count: quantity, Label: label }) => {
         const index = currentFilters.findIndex((x) => x === value);
         const selected = index > -1;
